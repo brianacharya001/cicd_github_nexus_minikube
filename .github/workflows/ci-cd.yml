@@ -23,21 +23,21 @@ jobs:
         run: |
           mkdir -p ~/.m2
           cat <<EOF > ~/.m2/settings.xml
-<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
-  <servers>
-    <server>
-      <id>nexus-releases</id>
-      <username>${NEXUS_USERNAME}</username>
-      <password>${NEXUS_PASSWORD}</password>
-    </server>
-    <server>
-      <id>nexus-snapshots</id>
-      <username>${NEXUS_USERNAME}</username>
-      <password>${NEXUS_PASSWORD}</password>
-    </server>
-  </servers>
-</settings>
-EOF
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>nexus-releases</id>
+                <username>${NEXUS_USERNAME}</username>
+                <password>${NEXUS_PASSWORD}</password>
+              </server>
+              <server>
+                <id>nexus-snapshots</id>
+                <username>${NEXUS_USERNAME}</username>
+                <password>${NEXUS_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
         env:
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
@@ -91,4 +91,11 @@ EOF
             --set image.repository=192.168.1.155:9090/my-docker-repo/spring-app \
             --set image.tag=latest \
             --set image.pullPolicy=Always \
-            --w
+            --wait
+
+      - name: Verify Deployment (Smoke Test)
+        run: |
+          kubectl rollout status deployment/spring-app-deployment
+          URL=$(minikube service spring-app-service --url)
+          echo "Testing Health Endpoint: $URL/health"
+          curl -f "$URL/health"
