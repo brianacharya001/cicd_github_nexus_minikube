@@ -18,28 +18,17 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # UPDATE: Check current directory 
-      # WHY: To see if the repo structure is nested (e.g., my-app/pom.xml instead of ./pom.xml)
-      - name: Check Current Directory Structure
-        run: ls -R
-
       - name: Make Maven Wrapper Executable
         run: chmod +x ./mvnw
 
-      # UPDATE: Use 'install' instead of 'package'
-      # WHY: 'install' ensures all dependencies are resolved and the JAR is definitely created.
       - name: Build JAR
-        run: ./mvnw clean install -DskipTests
-
-      # UPDATE: Forced search for the JAR
-      # WHY: If 'target/' isn't in the root, this command will find where it actually is.
-      - name: Find JAR Location
-        run: find . -name "*.jar"
+        # Now that pom.xml is filled, this will create target/demo-0.0.1-SNAPSHOT.jar
+        run: ./mvnw clean package -DskipTests
 
       - name: Build Docker Image in Minikube
         run: |
           eval $(minikube -p minikube docker-env)
-          # We use the location found in the previous step
+          # We use a simple tag for the build
           docker build -t my-spring-app:latest .
 
       - name: Deploy to Minikube with Helm
@@ -50,3 +39,6 @@ jobs:
             --set image.repository=my-spring-app \
             --set image.tag=latest \
             --wait
+
+      - name: Get Service URL
+        run: minikube service spring-boot-release --url
