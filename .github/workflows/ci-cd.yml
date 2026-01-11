@@ -25,13 +25,18 @@ jobs:
 
       - name: Build JAR
         run: |
-          # Clean and package
-          ./mvnw clean package -DskipTests
+          # Ensure we are in the directory with pom.xml
+          echo "Checking for pom.xml..."
+          ls -la pom.xml
           
-          # DEBUG: If target doesn't exist, show us the whole folder structure
+          # Run maven with explicit error logging
+          ./mvnw clean package -DskipTests --errors --batch-mode
+          
+          # Check if target exists; if not, list EVERYTHING to find where it went
           if [ ! -d "target" ]; then
-            echo "❌ ERROR: target/ folder was not created. Showing file tree:"
-            find . -maxdepth 5 -not -path '*/.*'
+            echo "❌ ERROR: target/ folder was not created."
+            echo "Printing mvnw version info:"
+            ./mvnw -v
             exit 1
           fi
 
