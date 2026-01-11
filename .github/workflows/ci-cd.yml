@@ -83,4 +83,18 @@ jobs:
             --wait
 
       - name: Get Service URL
-        run: minikube service spring-boot-release --url
+        run: |
+          echo "Listing all services in default namespace:"
+          kubectl get svc
+          
+          echo "Attempting to get URL..."
+          # This command tries to find the service name dynamically
+          SVC_NAME=$(kubectl get svc -l "app.kubernetes.io/instance=spring-boot-release" -o jsonpath='{.items[0].metadata.name}')
+          
+          if [ -z "$SVC_NAME" ]; then
+            # Fallback to the chart name if the instance label isn't set
+            SVC_NAME=$(kubectl get svc -l "app.kubernetes.io/name=spring-app" -o jsonpath='{.items[0].metadata.name}')
+          fi
+          
+          echo "Found Service: $SVC_NAME"
+          minikube service $SVC_NAME --url
