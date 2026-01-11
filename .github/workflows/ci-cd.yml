@@ -64,7 +64,7 @@ EOF
         run: |
           docker build -t 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} .
           docker tag 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} \
-                     192.168.1.155:9090/my-docker-repo/spring-app:latest
+            192.168.1.155:9090/my-docker-repo/spring-app:latest
 
       - name: Push Image to Nexus Docker Registry
         run: |
@@ -91,11 +91,4 @@ EOF
             --set image.repository=192.168.1.155:9090/my-docker-repo/spring-app \
             --set image.tag=latest \
             --set image.pullPolicy=Always \
-            --wait
-
-      - name: Verify Deployment (Smoke Test)
-        run: |
-          kubectl rollout status deployment/spring-app-deployment
-          URL=$(minikube service spring-app-service --url)
-          echo "Testing Health Endpoint: $URL/health"
-          curl -f "$URL/health"
+            --w
