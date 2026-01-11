@@ -1,47 +1,42 @@
-name: Deploy Spring Boot to Minikube (Self-Hosted)
+name: Deploy Spring Boot (Self-Hosted Minikube)
 
 on:
-  workflow_dispatch: # Manual trigger from GitHub UI
+  workflow_dispatch: # Manual trigger
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: self-hosted
-
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Verify Minikube Connectivity
-        run: |
-          echo "Switching to Minikube context..."
-          kubectl config use-context minikube
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
 
-          echo "Checking cluster status..."
-          if ! kubectl cluster-info; then
-            echo "Error: Minikube is not reachable. Ensure 'minikube start' was run on the host."
-            exit 1
-          fi
+      - name: Build JAR and Run Tests
+        run: ./mvnw clean package
 
       - name: Build Docker Image in Minikube
         run: |
-          # Point the shell to Minikube's Docker daemon
+          # Point Docker CLI to Minikube's internal Docker engine
           eval $(minikube -p minikube docker-env)
-
-          # Build the image directly inside Minikube's registry
-          ./mvnw clean package -DskipTests
           docker build -t my-spring-app:latest .
 
-      - name: Deploy Application via Helm
+      - name: Deploy to Minikube with Helm
         run: |
-          # Use 'upgrade --install' to handle both first-time and updates
-          helm upgrade --install my-spring-app ./charts/spring-app \
-            --namespace spring-apps \
-            --create-namespace \
-            --values ./charts/spring-app/values.yaml \
-            --wait \
-            --timeout 5m
+          # Ensure we are in the right context
+          kubectl config use-context minikube
+          
+          # Deploy using the local helm chart
+          helm upgrade --install spring-boot-release ./charts/spring-app \
+            --namespace default \
+            --wait
 
-      - name: Show Deployment Status
+      - name: Get Service URL
         run: |
-          kubectl get pods -n spring-apps
-          echo "Access URL: $(minikube service my-spring-app -n spring-apps --url)"
+          echo "Application is available at:"
+          minikube service spring-boot-release --url
