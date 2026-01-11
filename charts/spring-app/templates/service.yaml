@@ -1,0 +1,2 @@
+metadata:
+  name: { { include "spring-app.fullname" . } } # This usually results in "spring-boot-release-spring-app"
