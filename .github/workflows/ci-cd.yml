@@ -18,54 +18,45 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: maven
-
-      - name: Build JAR with Maven
+          # We remove the cache for this test to ensure a clean environment
+          
+      - name: Build JAR (Direct Maven)
         run: |
-          # 1. Fix line endings (CRLF to LF) for Linux compatibility
-          sed -i 's/\r$//' mvnw
-          chmod +x ./mvnw
+          echo "Checking Java version..."
+          java -version
           
-          # 2. Run the build
-          echo "Starting Maven build..."
-          ./mvnw clean package -DskipTests --batch-mode --errors
+          echo "Attempting build with installed Maven..."
+          # Using 'mvn' instead of './mvnw' to bypass wrapper script issues
+          mvn clean package -DskipTests --batch-mode --errors
           
-          # 3. Verify target directory was created
-          if [ ! -d "target" ]; then
-            echo "❌ ERROR: target/ folder was not created. Maven build likely failed."
-            exit 1
+          # If 'mvn' is not in PATH, fall back to wrapper with absolute path
+          if [ $? -ne 0 ]; then
+            echo "Direct mvn failed or not found, trying wrapper force-fix..."
+            sed -i 's/\r$//' mvnw
+            chmod +x ./mvnw
+            sh ./mvnw clean package -DskipTests --batch-mode --errors
           fi
 
       - name: Prepare Docker Context
         run: |
-          # Find the actual JAR file (matching 'demo' from your pom.xml)
-          # We exclude '-sources.jar' and '-javadoc.jar'
-          JAR_PATH=$(find target/ -maxdepth 1 -name "demo-*.jar" ! -name "*sources.jar" ! -name "*javadoc.jar" | head -n 1)
-          
-          if [ -z "$JAR_PATH" ]; then
-            echo "❌ ERROR: Could not find the generated JAR file in target/"
-            ls -la target/
+          if [ ! -d "target" ]; then
+            echo "❌ ERROR: target/ folder still missing. Listing workspace:"
+            ls -R
             exit 1
           fi
           
+          JAR_PATH=$(find target/ -maxdepth 1 -name "demo-*.jar" ! -name "*sources.jar" | head -n 1)
           echo "✅ Found JAR: $JAR_PATH"
-          # Standardize name for the Dockerfile
           cp "$JAR_PATH" target/app.jar
 
       - name: Build Docker Image in Minikube
         run: |
-          # Point Docker CLI to the Docker daemon inside Minikube
           eval $(minikube -p minikube docker-env)
-          
-          echo "Building Docker image..."
           docker build -t my-spring-app:latest .
 
       - name: Deploy to Minikube with Helm
         run: |
-          # Ensure kubectl is pointing to minikube
           kubectl config use-context minikube
-          
-          echo "Deploying Helm chart..."
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --namespace default \
             --set image.repository=my-spring-app \
@@ -74,6 +65,4 @@ jobs:
             --wait
 
       - name: Get Service URL
-        run: |
-          echo "Deployment complete. Access your app at:"
-          minikube service spring-boot-release --url
+        run: minikube service spring-boot-release --url
