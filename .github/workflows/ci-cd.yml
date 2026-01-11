@@ -11,52 +11,70 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          clean: true
+          clean: true # Ensures a fresh workspace to avoid old build interference
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          # We remove the cache for this test to ensure a clean environment
-          
-      - name: Build JAR (Direct Maven)
+          # CACHE REMOVED: In self-hosted runners, corrupted caches can 
+          # prevent the 'target' folder from being written to correctly.
+
+      - name: Build JAR (Hybrid Maven Approach)
         run: |
           echo "Checking Java version..."
           java -version
           
-          echo "Attempting build with installed Maven..."
-          # Using 'mvn' instead of './mvnw' to bypass wrapper script issues
+          echo "Attempting build with system Maven..."
+          # CHANGE: We try 'mvn' directly first.
+          # WHY: Self-hosted runners often have Maven installed. System Maven 
+          # is more stable than the wrapper script which can suffer from 
+          # permission or line-ending issues on Linux.
           mvn clean package -DskipTests --batch-mode --errors
           
-          # If 'mvn' is not in PATH, fall back to wrapper with absolute path
+          # CHANGE: Logic check using exit code ($?)
+          # WHY: If 'mvn' is not installed on the runner, the script falls back 
+          # to the wrapper (mvnw) automatically so the build doesn't fail.
           if [ $? -ne 0 ]; then
-            echo "Direct mvn failed or not found, trying wrapper force-fix..."
+            echo "System mvn failed/not found, trying wrapper fix..."
+            # FIX: Strip Windows Carriage Returns (\r)
             sed -i 's/\r$//' mvnw
             chmod +x ./mvnw
+            # FIX: Use 'sh' to execute the wrapper to bypass shell path issues
             sh ./mvnw clean package -DskipTests --batch-mode --errors
           fi
 
       - name: Prepare Docker Context
         run: |
+          # CHANGE: Added explicit directory verification
           if [ ! -d "target" ]; then
-            echo "❌ ERROR: target/ folder still missing. Listing workspace:"
+            echo "❌ ERROR: target/ folder missing. Check Maven output above."
             ls -R
             exit 1
           fi
           
+          # CHANGE: Specific JAR lookup excluding 'sources' or 'javadoc' JARs
+          # WHY: Spring Boot builds often generate multiple JARs. We only 
+          # want the executable one for the Docker image.
           JAR_PATH=$(find target/ -maxdepth 1 -name "demo-*.jar" ! -name "*sources.jar" | head -n 1)
           echo "✅ Found JAR: $JAR_PATH"
           cp "$JAR_PATH" target/app.jar
 
       - name: Build Docker Image in Minikube
         run: |
+          # CHANGE: Eval Minikube environment
+          # WHY: This tells the Docker CLI to talk to the Docker daemon 
+          # INSIDE Minikube rather than the runner's host Docker.
           eval $(minikube -p minikube docker-env)
           docker build -t my-spring-app:latest .
 
       - name: Deploy to Minikube with Helm
         run: |
           kubectl config use-context minikube
+          # CHANGE: Explicit image.pullPolicy=Never
+          # WHY: Since the image was built inside Minikube's Docker, K8s 
+          # must NOT try to pull it from the internet (it will fail).
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --namespace default \
             --set image.repository=my-spring-app \
