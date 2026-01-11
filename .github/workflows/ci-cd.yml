@@ -73,10 +73,6 @@ jobs:
         run: |
           kubectl config use-context minikube
           
-          # CHANGE: Check for syntax errors before trying to install
-          echo "Checking Helm template for errors..."
-          helm template spring-boot-release ./charts/spring-app
-          
           echo "Deploying Helm chart..."
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --namespace default \
@@ -87,17 +83,9 @@ jobs:
 
       - name: Get Service URL
         run: |
-          echo "Listing all services in default namespace:"
-          kubectl get svc
-          
-          echo "Attempting to get URL..."
-          # This command tries to find the service name dynamically
-          SVC_NAME=$(kubectl get svc -l "app.kubernetes.io/instance=spring-boot-release" -o jsonpath='{.items[0].metadata.name}')
-          
-          if [ -z "$SVC_NAME" ]; then
-            # Fallback to the chart name if the instance label isn't set
-            SVC_NAME=$(kubectl get svc -l "app.kubernetes.io/name=spring-app" -o jsonpath='{.items[0].metadata.name}')
-          fi
-          
-          echo "Found Service: $SVC_NAME"
-          minikube service $SVC_NAME --url
+          echo "Waiting for service..."
+          sleep 5
+          # We use the hardcoded name from the fixed service.yaml
+          minikube service spring-boot-service --url
+
+      

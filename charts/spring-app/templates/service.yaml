@@ -1,16 +1,20 @@
-apiVersion: v1
-kind: Service
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  # The quotes around the {{ }} are critical to avoid YAML parse errors
-  name: {{ include "spring-app.fullname" . | quote }}
-  labels:
-    {{- include "spring-app.labels" . | nindent 4 }}
+  name: spring-app-deployment
 spec:
-  type: NodePort  # Important for Minikube
-  ports:
-    - port: 8080
-      targetPort: 8080
-      protocol: TCP
-      name: http
+  replicas: 1
   selector:
-    {{- include "spring-app.selectorLabels" . | nindent 4 }}
+    matchLabels:
+      app: spring-app
+  template:
+    metadata:
+      labels:
+        app: spring-app
+    spec:
+      containers:
+        - name: spring-boot-container
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
