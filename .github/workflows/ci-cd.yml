@@ -1,106 +1,78 @@
-name: Deploy Spring Boot (Self-Hosted Minikube)
+name: CI/CD with Nexus and Minikube
 
 on:
   workflow_dispatch: 
 
 jobs:
-  build-and-deploy:
+  build-and-push-jar:
     runs-on: self-hosted
-    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          clean: true # Ensures a fresh workspace to avoid old build interference
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          # CACHE REMOVED: In self-hosted runners, corrupted caches can 
-          # prevent the 'target' folder from being written to correctly.
+          server-id: nexus-releases # Matches the ID in pom.xml and settings.xml
+          server-username: NEXUS_USERNAME
+          server-password: NEXUS_PASSWORD
 
-      - name: Build JAR (Hybrid Maven Approach)
+      - name: Compile and Unit Test
+        run: mvn clean test
+
+      - name: Build and Push Artifact to Nexus
+        # This pushes the JAR to http://192.168.1.155:9090/#browse/browse:my-releases
+        run: mvn deploy -DskipTests -s $GITHUB_WORKSPACE/settings.xml
+        env:
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+
+  build-and-push-docker:
+    needs: build-and-push-jar
+    runs-on: self-hosted
+    steps:
+      - name: Docker Login to Nexus
         run: |
-          echo "Checking Java version..."
-          java -version
-          
-          echo "Attempting build with system Maven..."
-          # CHANGE: We try 'mvn' directly first.
-          # WHY: Self-hosted runners often have Maven installed. System Maven 
-          # is more stable than the wrapper script which can suffer from 
-          # permission or line-ending issues on Linux.
-          mvn clean package -DskipTests --batch-mode --errors
-          
-          # CHANGE: Logic check using exit code ($?)
-          # WHY: If 'mvn' is not installed on the runner, the script falls back 
-          # to the wrapper (mvnw) automatically so the build doesn't fail.
-          if [ $? -ne 0 ]; then
-            echo "System mvn failed/not found, trying wrapper fix..."
-            # FIX: Strip Windows Carriage Returns (\r)
-            sed -i 's/\r$//' mvnw
-            chmod +x ./mvnw
-            # FIX: Use 'sh' to execute the wrapper to bypass shell path issues
-            sh ./mvnw clean package -DskipTests --batch-mode --errors
-          fi
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login http://192.168.1.155:9090 --username ${{ secrets.NEXUS_USERNAME }}
 
-      - name: Prepare Docker Context
+      - name: Build Docker Image
         run: |
-          # CHANGE: Added explicit directory verification
-          if [ ! -d "target" ]; then
-            echo "❌ ERROR: target/ folder missing. Check Maven output above."
-            ls -R
-            exit 1
-          fi
-          
-          # CHANGE: Specific JAR lookup excluding 'sources' or 'javadoc' JARs
-          # WHY: Spring Boot builds often generate multiple JARs. We only 
-          # want the executable one for the Docker image.
-          JAR_PATH=$(find target/ -maxdepth 1 -name "demo-*.jar" ! -name "*sources.jar" | head -n 1)
-          echo "✅ Found JAR: $JAR_PATH"
-          cp "$JAR_PATH" target/app.jar
+          # Use the JAR built in the previous step
+          docker build -t 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} .
+          docker tag 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} 192.168.1.155:9090/my-docker-repo/spring-app:latest
 
-      - name: Build Docker Image in Minikube
+      - name: Push Image to Nexus Docker Registry
         run: |
-          # CHANGE: Eval Minikube environment
-          # WHY: This tells the Docker CLI to talk to the Docker daemon 
-          # INSIDE Minikube rather than the runner's host Docker.
-          eval $(minikube -p minikube docker-env)
-          docker build -t my-spring-app:latest .
+          docker push 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }}
+          docker push 192.168.1.155:9090/my-docker-repo/spring-app:latest
 
-      - name: Deploy to Minikube with Helm
+  deploy-to-minikube:
+    needs: build-and-push-docker
+    runs-on: self-hosted
+    steps:
+      - name: Smoke Test & Deploy
         run: |
           kubectl config use-context minikube
           
-          echo "Deploying Helm chart..."
+          # Create Image Pull Secret so Minikube can talk to Nexus
+          kubectl create secret docker-registry nexus-creds \
+            --docker-server=192.168.1.155:9090 \
+            --docker-username=${{ secrets.NEXUS_USERNAME }} \
+            --docker-password=${{ secrets.NEXUS_PASSWORD }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
           helm upgrade --install spring-boot-release ./charts/spring-app \
-            --namespace default \
-            --set image.repository=my-spring-app \
+            --set image.repository=192.168.1.155:9090/my-docker-repo/spring-app \
             --set image.tag=latest \
-            --set image.pullPolicy=Never \
+            --set image.pullPolicy=Always \
             --wait
 
-      - name: Get Service URL
+      - name: Verify Deployment (Smoke Test)
         run: |
-          echo "Listing all services to verify names..."
-          kubectl get svc
-          
-          echo "-------------------------------------------------------"
-          
-          # Dynamically find the service name that contains 'spring'
-          # This avoids hardcoding issues if Helm added a prefix
-          SERVICE_NAME=$(kubectl get svc --no-headers -o custom-columns=":metadata.name" | grep "spring" | head -n 1)
-          
-          if [ -z "$SERVICE_NAME" ]; then
-            echo "❌ ERROR: No service containing 'spring' was found."
-            exit 1
-          fi
-          
-          echo "✅ Found Service: $SERVICE_NAME"
-          echo "Fetching URL from Minikube..."
-          
-          # Try to get the URL
-          minikube service $SERVICE_NAME --url
-
-      
+          echo "Waiting for pods to be ready..."
+          kubectl rollout status deployment/spring-app-deployment
+          URL=$(minikube service spring-app-service --url)
+          echo "Testing Health Endpoint: $URL/health"
+          curl -f "$URL/health" || exit 1
