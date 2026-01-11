@@ -101,6 +101,6 @@ jobs:
           echo "Fetching URL from Minikube..."
           
           # Try to get the URL
-          minikube service $SERVICE_NAME --urlc
+          minikube service $SERVICE_NAME --url
 
       
