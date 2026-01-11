@@ -20,50 +20,60 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Fix and Execute Maven Wrapper
+      - name: Build JAR with Maven
         run: |
-          # Fix potential Windows line ending issues (CRLF to LF)
+          # 1. Fix line endings (CRLF to LF) for Linux compatibility
           sed -i 's/\r$//' mvnw
           chmod +x ./mvnw
           
-          # Run build and capture output to see exactly why it fails if it does
-          ./mvnw clean package -DskipTests --batch-mode
+          # 2. Run the build
+          echo "Starting Maven build..."
+          ./mvnw clean package -DskipTests --batch-mode --errors
+          
+          # 3. Verify target directory was created
+          if [ ! -d "target" ]; then
+            echo "❌ ERROR: target/ folder was not created. Maven build likely failed."
+            exit 1
+          fi
 
       - name: Prepare Docker Context
         run: |
-          # Ensure target exists
-          if [ ! -d "target" ]; then
-            echo "❌ ERROR: target/ folder was not created. Listing directory for debug:"
-            ls -R
-            exit 1
-          fi
-          
-          # Find the JAR - the artifactId is 'demo' in your pom.xml
-          JAR_PATH=$(find target/ -name "demo-*.jar" -not -name "*sources.jar" | head -n 1)
+          # Find the actual JAR file (matching 'demo' from your pom.xml)
+          # We exclude '-sources.jar' and '-javadoc.jar'
+          JAR_PATH=$(find target/ -maxdepth 1 -name "demo-*.jar" ! -name "*sources.jar" ! -name "*javadoc.jar" | head -n 1)
           
           if [ -z "$JAR_PATH" ]; then
-            echo "❌ ERROR: No JAR file found in target/."
+            echo "❌ ERROR: Could not find the generated JAR file in target/"
+            ls -la target/
             exit 1
           fi
           
-          echo "✅ Found JAR at: $JAR_PATH"
+          echo "✅ Found JAR: $JAR_PATH"
+          # Standardize name for the Dockerfile
           cp "$JAR_PATH" target/app.jar
 
       - name: Build Docker Image in Minikube
         run: |
-          # Use Minikube's Docker daemon
+          # Point Docker CLI to the Docker daemon inside Minikube
           eval $(minikube -p minikube docker-env)
+          
+          echo "Building Docker image..."
           docker build -t my-spring-app:latest .
 
       - name: Deploy to Minikube with Helm
         run: |
+          # Ensure kubectl is pointing to minikube
           kubectl config use-context minikube
-          # Ensure the chart path exists on your runner
+          
+          echo "Deploying Helm chart..."
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --namespace default \
             --set image.repository=my-spring-app \
             --set image.tag=latest \
+            --set image.pullPolicy=Never \
             --wait
 
       - name: Get Service URL
-        run: minikube service spring-boot-release --url
+        run: |
+          echo "Deployment complete. Access your app at:"
+          minikube service spring-boot-release --url
