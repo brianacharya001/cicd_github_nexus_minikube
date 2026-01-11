@@ -83,9 +83,24 @@ jobs:
 
       - name: Get Service URL
         run: |
-          echo "Waiting for service..."
-          sleep 5
-          # We use the hardcoded name from the fixed service.yaml
-          minikube service spring-boot-service --url
+          echo "Listing all services to verify names..."
+          kubectl get svc
+          
+          echo "-------------------------------------------------------"
+          
+          # Dynamically find the service name that contains 'spring'
+          # This avoids hardcoding issues if Helm added a prefix
+          SERVICE_NAME=$(kubectl get svc --no-headers -o custom-columns=":metadata.name" | grep "spring" | head -n 1)
+          
+          if [ -z "$SERVICE_NAME" ]; then
+            echo "❌ ERROR: No service containing 'spring' was found."
+            exit 1
+          fi
+          
+          echo "✅ Found Service: $SERVICE_NAME"
+          echo "Fetching URL from Minikube..."
+          
+          # Try to get the URL
+          minikube service $SERVICE_NAME --url
 
       
