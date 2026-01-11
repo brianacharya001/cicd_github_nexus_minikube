@@ -1,11 +1,13 @@
 name: CI/CD with Nexus and Minikube
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build-and-push-jar:
     runs-on: self-hosted
+    environment: production   # 👈 REQUIRED for Environment secrets
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -15,33 +17,49 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          server-id: nexus-releases # Matches the ID in pom.xml and settings.xml
-          server-username: NEXUS_USERNAME
-          server-password: NEXUS_PASSWORD
+
+      # 🔑 THIS STEP FIXES THE 401 ERROR
+      - name: Configure Maven settings.xml for Nexus
+        run: |
+          mkdir -p ~/.m2
+          cat <<EOF > ~/.m2/settings.xml
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>nexus-releases</id>
+                <username>${NEXUS_USERNAME}</username>
+                <password>${NEXUS_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+        env:
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
 
       - name: Compile and Unit Test
         run: mvn clean test
 
       - name: Build and Push Artifact to Nexus
-        # This pushes the JAR to http://192.168.1.155:9090/#browse/browse:my-releases
-        run: mvn deploy -DskipTests -s $GITHUB_WORKSPACE/settings.xml
-        env:
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: mvn deploy -DskipTests
 
   build-and-push-docker:
     needs: build-and-push-jar
     runs-on: self-hosted
+    environment: production
+
     steps:
       - name: Docker Login to Nexus
         run: |
-          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login http://192.168.1.155:9090 --username ${{ secrets.NEXUS_USERNAME }}
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login 192.168.1.155:9090 \
+            --username "${{ secrets.NEXUS_USERNAME }}" \
+            --password-stdin
 
       - name: Build Docker Image
         run: |
-          # Use the JAR built in the previous step
           docker build -t 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} .
-          docker tag 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} 192.168.1.155:9090/my-docker-repo/spring-app:latest
+          docker tag 192.168.1.155:9090/my-docker-repo/spring-app:${{ github.sha }} \
+                     192.168.1.155:9090/my-docker-repo/spring-app:latest
 
       - name: Push Image to Nexus Docker Registry
         run: |
@@ -51,12 +69,13 @@ jobs:
   deploy-to-minikube:
     needs: build-and-push-docker
     runs-on: self-hosted
+    environment: production
+
     steps:
       - name: Smoke Test & Deploy
         run: |
           kubectl config use-context minikube
-          
-          # Create Image Pull Secret so Minikube can talk to Nexus
+
           kubectl create secret docker-registry nexus-creds \
             --docker-server=192.168.1.155:9090 \
             --docker-username=${{ secrets.NEXUS_USERNAME }} \
@@ -71,8 +90,7 @@ jobs:
 
       - name: Verify Deployment (Smoke Test)
         run: |
-          echo "Waiting for pods to be ready..."
           kubectl rollout status deployment/spring-app-deployment
           URL=$(minikube service spring-app-service --url)
           echo "Testing Health Endpoint: $URL/health"
-          curl -f "$URL/health" || exit 1
+          curl -f "$URL/health"
