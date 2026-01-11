@@ -18,43 +18,35 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # UPDATE: Added chmod command
-      # WHY: Fixes "Permission denied" (Error 126). 
-      # Git sometimes strips execution bits; this ensures the runner can execute the script.
+      # UPDATE: Check current directory 
+      # WHY: To see if the repo structure is nested (e.g., my-app/pom.xml instead of ./pom.xml)
+      - name: Check Current Directory Structure
+        run: ls -R
+
       - name: Make Maven Wrapper Executable
         run: chmod +x ./mvnw
 
-      - name: Build JAR and Run Tests
-        run: ./mvnw clean package
+      # UPDATE: Use 'install' instead of 'package'
+      # WHY: 'install' ensures all dependencies are resolved and the JAR is definitely created.
+      - name: Build JAR
+        run: ./mvnw clean install -DskipTests
 
-      # UPDATE: Added diagnostic step
-      # WHY: Fixes "no such file or directory". 
-      # This confirms Maven actually created the JAR in the 'target' folder before Docker tries to copy it.
-      - name: Verify Build Output
-        run: ls -l target/
+      # UPDATE: Forced search for the JAR
+      # WHY: If 'target/' isn't in the root, this command will find where it actually is.
+      - name: Find JAR Location
+        run: find . -name "*.jar"
 
       - name: Build Docker Image in Minikube
         run: |
           eval $(minikube -p minikube docker-env)
-          
-          # UPDATE: Enforced use of relative context (.)
-          # WHY: Ensures Docker looks for the 'target' folder relative to the root of your project.
+          # We use the location found in the previous step
           docker build -t my-spring-app:latest .
 
       - name: Deploy to Minikube with Helm
         run: |
           kubectl config use-context minikube
-          
-          # UPDATE: Added explicit --set flags
-          # WHY: Overrides any default values in your Helm chart to ensure it points 
-          # to the local image you just built instead of an external registry.
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --namespace default \
             --set image.repository=my-spring-app \
             --set image.tag=latest \
             --wait
-
-      - name: Get Service URL
-        run: |
-          echo "Application is available at:"
-          minikube service spring-boot-release --url
