@@ -72,9 +72,12 @@ jobs:
       - name: Deploy to Minikube with Helm
         run: |
           kubectl config use-context minikube
-          # CHANGE: Explicit image.pullPolicy=Never
-          # WHY: Since the image was built inside Minikube's Docker, K8s 
-          # must NOT try to pull it from the internet (it will fail).
+          
+          # CHANGE: Check for syntax errors before trying to install
+          echo "Checking Helm template for errors..."
+          helm template spring-boot-release ./charts/spring-app
+          
+          echo "Deploying Helm chart..."
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --namespace default \
             --set image.repository=my-spring-app \
