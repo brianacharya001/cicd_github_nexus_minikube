@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  name: spring-app-deployment
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}
+      app: spring-app
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}
+        app: spring-app
     spec:
       containers:
-        - name: spring-boot
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        - name: spring-boot-container
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 8080
