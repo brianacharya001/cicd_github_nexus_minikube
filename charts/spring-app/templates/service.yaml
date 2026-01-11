@@ -1,13 +1,16 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "spring-app.fullname" . }}
+  # The quotes around the {{ }} are critical to avoid YAML parse errors
+  name: {{ include "spring-app.fullname" . | quote }}
   labels:
-    app: {{ include "spring-app.name" . }}
+    {{- include "spring-app.labels" . | nindent 4 }}
 spec:
-  selector:
-    app: {{ include "spring-app.name" . }}
+  type: NodePort  # Important for Minikube
   ports:
-    - protocol: TCP
-      port: 80
+    - port: 8080
       targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "spring-app.selectorLabels" . | nindent 4 }}
