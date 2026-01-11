@@ -1,2 +1,13 @@
+apiVersion: v1
+kind: Service
 metadata:
-  name: { { include "spring-app.fullname" . } } # This usually results in "spring-boot-release-spring-app"
+  name: {{ include "spring-app.fullname" . }}
+  labels:
+    app: {{ include "spring-app.name" . }}
+spec:
+  selector:
+    app: {{ include "spring-app.name" . }}
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
