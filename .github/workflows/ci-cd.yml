@@ -22,29 +22,31 @@ jobs:
         run: chmod +x ./mvnw
 
       - name: Build JAR
-        # This will now work because of your new pom.xml
+        # This creates the JAR based on your new pom.xml
         run: ./mvnw clean package -DskipTests
 
-      # --- CRITICAL FIX STEP ---
+      # CRITICAL STEP: Prepare the path for the Dockerfile
       - name: Prepare Docker Context
         run: |
-          # Find the JAR file regardless of where it was built
-          JAR_FILE=$(find . -name "demo-*.jar" | grep "target/" | head -n 1)
-          echo "Found JAR at: $JAR_FILE"
+          # 1. Find the generated jar (handling any name)
+          JAR_PATH=$(find . -name "*.jar" | grep "target/" | head -n 1)
+          echo "Found JAR at: $JAR_PATH"
           
-          # Ensure a target folder exists in the ROOT for Docker to see
+          # 2. Create a clean target folder in the root
           mkdir -p ./target
           
-          # Copy the actual jar to the root target folder as 'app.jar'
-          cp "$JAR_FILE" ./target/app.jar
+          # 3. Copy it to the exact name expected by your Dockerfile
+          cp "$JAR_PATH" ./target/app.jar
           
-          echo "Contents of local target folder:"
-          ls -l ./target/
+          # 4. List it to verify for the logs
+          ls -l ./target/app.jar
 
       - name: Build Docker Image in Minikube
         run: |
+          # Point Docker to Minikube's engine
           eval $(minikube -p minikube docker-env)
-          # '.' uses the root as context, which now contains /target/app.jar
+          
+          # Build using the root directory (.) as the context
           docker build -t my-spring-app:latest .
 
       - name: Deploy to Minikube with Helm
@@ -55,3 +57,6 @@ jobs:
             --set image.repository=my-spring-app \
             --set image.tag=latest \
             --wait
+
+      - name: Get Service URL
+        run: minikube service spring-boot-release --url
