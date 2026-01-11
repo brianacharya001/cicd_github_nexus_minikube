@@ -1,0 +1,47 @@
+name: Deploy Spring Boot to Minikube (Self-Hosted)
+
+on:
+  workflow_dispatch: # Manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Minikube Connectivity
+        run: |
+          echo "Switching to Minikube context..."
+          kubectl config use-context minikube
+
+          echo "Checking cluster status..."
+          if ! kubectl cluster-info; then
+            echo "Error: Minikube is not reachable. Ensure 'minikube start' was run on the host."
+            exit 1
+          fi
+
+      - name: Build Docker Image in Minikube
+        run: |
+          # Point the shell to Minikube's Docker daemon
+          eval $(minikube -p minikube docker-env)
+
+          # Build the image directly inside Minikube's registry
+          ./mvnw clean package -DskipTests
+          docker build -t my-spring-app:latest .
+
+      - name: Deploy Application via Helm
+        run: |
+          # Use 'upgrade --install' to handle both first-time and updates
+          helm upgrade --install my-spring-app ./charts/spring-app \
+            --namespace spring-apps \
+            --create-namespace \
+            --values ./charts/spring-app/values.yaml \
+            --wait \
+            --timeout 5m
+
+      - name: Show Deployment Status
+        run: |
+          kubectl get pods -n spring-apps
+          echo "Access URL: $(minikube service my-spring-app -n spring-apps --url)"
