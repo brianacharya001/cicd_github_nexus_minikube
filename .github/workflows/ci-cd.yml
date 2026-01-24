@@ -18,12 +18,15 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
-      # 🔑 Configure Maven settings.xml for Nexus correctly
+      # 🔑 Configure Maven settings.xml for Nexus (with repositories)
       - name: Configure Maven settings.xml for Nexus
         run: |
           mkdir -p ~/.m2
           cat <<EOF > ~/.m2/settings.xml
-          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                                        https://maven.apache.org/xsd/settings-1.0.0.xsd">
             <servers>
               <server>
                 <id>nexus-releases</id>
@@ -36,11 +39,63 @@ jobs:
                 <password>${NEXUS_PASSWORD}</password>
               </server>
             </servers>
+
+            <profiles>
+              <profile>
+                <id>nexus</id>
+                <repositories>
+                  <repository>
+                    <id>nexus-releases</id>
+                    <url>http://192.168.49.2:30192/repository/maven-releases/</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>false</enabled></snapshots>
+                  </repository>
+                  <repository>
+                    <id>nexus-snapshots</id>
+                    <url>http://192.168.49.2:30192/repository/my-snapshots/</url>
+                    <releases><enabled>false</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </repositories>
+
+                <pluginRepositories>
+                  <pluginRepository>
+                    <id>nexus-releases</id>
+                    <url>http://192.168.49.2:30192/repository/maven-releases/</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>false</enabled></snapshots>
+                  </pluginRepository>
+                  <pluginRepository>
+                    <id>nexus-snapshots</id>
+                    <url>http://192.168.49.2:30192/repository/my-snapshots/</url>
+                    <releases><enabled>false</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </pluginRepository>
+                </pluginRepositories>
+              </profile>
+            </profiles>
+
+            <activeProfiles>
+              <activeProfile>nexus</activeProfile>
+            </activeProfiles>
           </settings>
           EOF
         env:
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+
+      # 🔄 Clear Maven cache to avoid stale snapshot issues
+      - name: Clear Maven Cache
+        run: mvn dependency:purge-local-repository -DreResolve=false
+
+      # Optional: cache Maven repository for faster builds
+      - name: Cache Maven Repository
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
       - name: Compile and Unit Test
         run: mvn clean test
