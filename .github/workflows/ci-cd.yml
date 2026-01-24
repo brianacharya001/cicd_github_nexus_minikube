@@ -104,7 +104,7 @@ jobs:
         run: mvn clean test
 
       - name: Build and Push Artifact to Nexus
-        run: mvn deploy -DskipTests
+        run: mvn deploy -U -DskipTests
 
   build-and-push-docker:
     needs: build-and-push-jar
