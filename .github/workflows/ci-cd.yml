@@ -88,7 +88,7 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f -
 
           helm upgrade --install spring-boot-release ./charts/spring-app \
-            --set image.repository=192.168.1.155:9090/my-docker-repo/spring-app \
+            --set image.repository=192.168.1.22:9090/my-docker-repo/spring-app \
             --set image.tag=latest \
             --set image.pullPolicy=Always \
             --wait
