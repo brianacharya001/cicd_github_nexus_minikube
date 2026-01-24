@@ -114,20 +114,20 @@ jobs:
     steps:
       - name: Docker Login to Nexus
         run: |
-          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login 192.168.1.22:9090 \
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login localhost:32000 \
             --username "${{ secrets.NEXUS_USERNAME }}" \
             --password-stdin
 
       - name: Build Docker Image
         run: |
-          docker build -t 192.168.1.22:9090/my-docker-repo/spring-app:${{ github.sha }} .
-          docker tag 192.168.1.22:9090/my-docker-repo/spring-app:${{ github.sha }} \
+          docker build -t localhost:32000/my-docker-repo/spring-app:${{ github.sha }} .
+          docker tag localhost:32000/my-docker-repo/spring-app:${{ github.sha }} \
             192.168.1.22:9090/my-docker-repo/spring-app:latest
 
       - name: Push Image to Nexus Docker Registry
         run: |
-          docker push 192.168.1.22:9090/my-docker-repo/spring-app:${{ github.sha }}
-          docker push 192.168.1.22:9090/my-docker-repo/spring-app:latest
+          docker push localhost:32000/my-docker-repo/spring-app:${{ github.sha }}
+          docker push localhost:32000/my-docker-repo/spring-app:latest
 
   deploy-to-minikube:
     needs: build-and-push-docker
@@ -140,13 +140,13 @@ jobs:
           kubectl config use-context minikube
 
           kubectl create secret docker-registry nexus-creds \
-            --docker-server=192.168.1.22:9090 \
+            --docker-server=localhost:32000 \
             --docker-username=${{ secrets.NEXUS_USERNAME }} \
             --docker-password=${{ secrets.NEXUS_PASSWORD }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
           helm upgrade --install spring-boot-release ./charts/spring-app \
-            --set image.repository=192.168.1.22:9090/my-docker-repo/spring-app \
+            --set image.repository=localhost:32000/my-docker-repo/spring-app \
             --set image.tag=latest \
             --set image.pullPolicy=Always \
             --wait
