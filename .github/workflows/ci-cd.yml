@@ -87,6 +87,9 @@ jobs:
       # 🔄 Clear Maven cache to avoid stale snapshot issues
       #- name: Clear Maven Cache
        # run: mvn dependency:purge-local-repository -DreResolve=false
+      - name: Clear Maven Cache for Project
+        run: rm -rf ~/.m2/repository/com/example/demo
+
 
       # Optional: cache Maven repository for faster builds
       - name: Cache Maven Repository
