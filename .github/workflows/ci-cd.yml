@@ -85,8 +85,8 @@ jobs:
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
 
       # 🔄 Clear Maven cache to avoid stale snapshot issues
-      - name: Clear Maven Cache
-        run: mvn dependency:purge-local-repository -DreResolve=false
+      #- name: Clear Maven Cache
+       # run: mvn dependency:purge-local-repository -DreResolve=false
 
       # Optional: cache Maven repository for faster builds
       - name: Cache Maven Repository
