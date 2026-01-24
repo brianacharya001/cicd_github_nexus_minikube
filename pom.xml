@@ -43,17 +43,14 @@
         </plugins>
     </build>
     <distributionManagement>
-
   <snapshotRepository>
     <id>nexus-snapshots</id>
-    <url>http://192.168.1.22:9090/repository/my-snapshots/</url>
+    <url>${nexus.snapshots.url}</url>
   </snapshotRepository>
 
   <repository>
     <id>nexus-releases</id>
-    <url>http://192.168.1.22:9090/repository/my-releases/</url>
+    <url>${nexus.releases.url}</url>
   </repository>
-
 </distributionManagement>
-
 </project>
