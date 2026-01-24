@@ -152,8 +152,29 @@ jobs:
             --set image.pullPolicy=Always \
             --wait
 
-      - name: Verify Deployment
+      - name: Verify Deployment (wait for app)
         run: |
-          kubectl rollout status deployment/spring-app-deployment
+          set -e
+
+          echo "Waiting for pod to be Ready..."
+           kubectl wait \
+             --for=condition=ready pod \
+             -l app=spring-app \
+             --timeout=120s
+
+          echo "Waiting for service endpoint..."
           URL=$(minikube service spring-app-service --url)
-          curl -f "$URL/health"
+          echo "Service URL: $URL"
+
+          for i in {1..15}; do
+          echo "Health check attempt $i..."
+          if curl -f "$URL/health"; then
+             echo "✅ Application is healthy"
+             exit 0
+          fi
+          sleep 5
+          done
+
+          echo "❌ Application did not become healthy in time"
+           exit 1
+  
