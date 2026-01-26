@@ -26,7 +26,8 @@ jobs:
       - name: Configure Maven settings.xml for Nexus
         run: |
           mkdir -p ~/.m2
-          cat <<'EOF' > ~/.m2/settings.xml
+          # MIN FIX: remove quotes around EOF so env vars expand
+          cat <<EOF > ~/.m2/settings.xml
           <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                     xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
@@ -103,7 +104,8 @@ jobs:
         run: mvn clean test
 
       - name: Build and Push Artifact to Nexus
-        run: mvn deploy -U -DskipTests
+        # MIN HARDENING: ensure Maven uses the settings we just created
+        run: mvn -s ~/.m2/settings.xml deploy -U -DskipTests
 
   build-scan-and-push-docker:
     needs: build-and-push-jar
