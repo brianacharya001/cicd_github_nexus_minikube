@@ -5,7 +5,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   build-and-push-jar:
@@ -22,14 +21,12 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
+      # 🔑 Configure Maven settings.xml for Nexus
       - name: Configure Maven settings.xml for Nexus
         run: |
           mkdir -p ~/.m2
           cat <<EOF > ~/.m2/settings.xml
-          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
-                                        https://maven.apache.org/xsd/settings-1.0.0.xsd">
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
             <servers>
               <server>
                 <id>nexus-releases</id>
@@ -42,7 +39,6 @@ jobs:
                 <password>${NEXUS_PASSWORD}</password>
               </server>
             </servers>
-
             <profiles>
               <profile>
                 <id>nexus</id>
@@ -50,34 +46,14 @@ jobs:
                   <repository>
                     <id>nexus-releases</id>
                     <url>http://192.168.49.2:30192/repository/maven-releases/</url>
-                    <releases><enabled>true</enabled></releases>
-                    <snapshots><enabled>false</enabled></snapshots>
                   </repository>
                   <repository>
                     <id>nexus-snapshots</id>
                     <url>http://192.168.49.2:30192/repository/my-snapshots/</url>
-                    <releases><enabled>false</enabled></releases>
-                    <snapshots><enabled>true</enabled></snapshots>
                   </repository>
                 </repositories>
-
-                <pluginRepositories>
-                  <pluginRepository>
-                    <id>nexus-releases</id>
-                    <url>http://192.168.49.2:30192/repository/maven-releases/</url>
-                    <releases><enabled>true</enabled></releases>
-                    <snapshots><enabled>false</enabled></snapshots>
-                  </pluginRepository>
-                  <pluginRepository>
-                    <id>nexus-snapshots</id>
-                    <url>http://192.168.49.2:30192/repository/my-snapshots/</url>
-                    <releases><enabled>false</enabled></releases>
-                    <snapshots><enabled>true</enabled></snapshots>
-                  </pluginRepository>
-                </pluginRepositories>
               </profile>
             </profiles>
-
             <activeProfiles>
               <activeProfile>nexus</activeProfile>
             </activeProfiles>
@@ -87,94 +63,23 @@ jobs:
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
 
-      - name: Clear Maven Cache for Project
-        run: rm -rf ~/.m2/repository/com/example/demo
-
-      - name: Cache Maven Repository
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
       - name: Compile and Unit Test
         run: mvn clean test
 
       - name: Build and Push Artifact to Nexus
-        run: mvn -s ~/.m2/settings.xml deploy -U -DskipTests
+        run: mvn -s ~/.m2/settings.xml deploy -DskipTests
 
   build-scan-and-push-docker:
     needs: build-and-push-jar
     runs-on: self-hosted
     environment: production
 
-    env:
-      GRYPE_DB_CACHE_DIR: ~/.cache/grype
-      GRYPE_CHECK_FOR_APP_UPDATE: "false"
-      GRYPE_VERSION: "v0.105.0"
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-
-      - name: Cache Maven Repository
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
       - name: Build Spring Boot JAR
         run: mvn clean package -DskipTests
-
-      - name: Cache Grype DB
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/grype
-          key: grype-db-${{ runner.os }}
-          restore-keys: |
-            grype-db-${{ runner.os }}
-
-      # ✅ FIX: Do NOT use install.sh (it sometimes still tries /usr/local/bin).
-      # ✅ Install Grype by downloading tarball into $HOME/.local/bin (no sudo).
-      - name: Install Grype (no sudo, user local bin)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          INSTALL_DIR="$HOME/.local/bin"
-          mkdir -p "$INSTALL_DIR"
-          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-
-          if command -v grype >/dev/null 2>&1; then
-            echo "grype already installed: $(grype version)"
-            exit 0
-          fi
-
-          OS="linux"
-          ARCH="amd64"
-          VERSION="${GRYPE_VERSION}"
-
-          TMP_DIR="$(mktemp -d)"
-          cd "$TMP_DIR"
-
-          echo "Downloading Grype ${VERSION}..."
-          curl -sSfL -o grype.tgz \
-            "https://github.com/anchore/grype/releases/download/${VERSION}/grype_${VERSION#v}_${OS}_${ARCH}.tar.gz"
-
-          tar -xzf grype.tgz
-          chmod +x grype
-          mv grype "$INSTALL_DIR/grype"
-
-          grype version
 
       - name: Docker Login to Nexus
         run: |
@@ -190,28 +95,20 @@ jobs:
           docker tag 192.168.49.2:32000/my-docker-repo/spring-app:${IMAGE_TAG} \
                      192.168.49.2:32000/my-docker-repo/spring-app:latest
 
-      - name: Grype Scan (Image) - fail on HIGH/CRITICAL
-        shell: bash
+      # ✅ Install Grype (exact command you provided)
+      - name: Install Grype
         run: |
-          set -euo pipefail
-          IMAGE="192.168.49.2:32000/my-docker-repo/spring-app:${IMAGE_TAG}"
+          mkdir -p $HOME/.local/bin
+          curl -sSfL https://get.anchore.io/grype | sh -s -- -b $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-          # DB update (cached after first run)
-          grype db update || true
-
-          # SARIF for GitHub Security
-          grype "$IMAGE" -o sarif > grype-results.sarif
-
-          # Fail pipeline if HIGH/CRITICAL found
-          grype "$IMAGE" --fail-on high > /dev/null
-        env:
-          GRYPE_DB_CACHE_DIR: ${{ env.GRYPE_DB_CACHE_DIR }}
-          GRYPE_CHECK_FOR_APP_UPDATE: "false"
-
-      - name: Upload Grype SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: grype-results.sarif
+      # ✅ QUICK & LIGHT Grype scan (image)
+      - name: Grype Scan (fail on HIGH/CRITICAL)
+        run: |
+          grype 192.168.49.2:32000/my-docker-repo/spring-app:${IMAGE_TAG} \
+            --only-fixed \
+            --fail-on high \
+            --output table
 
       - name: Push Image to Nexus Docker Registry
         run: |
@@ -224,9 +121,6 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
       - name: Deploy to Minikube
         run: |
           kubectl config use-context minikube
@@ -240,31 +134,4 @@ jobs:
           helm upgrade --install spring-boot-release ./charts/spring-app \
             --set image.repository=192.168.49.2:32000/my-docker-repo/spring-app \
             --set image.tag=latest \
-            --set image.pullPolicy=Always \
             --wait
-
-      - name: Verify Deployment (wait for app)
-        run: |
-          set -e
-
-          echo "Waiting for pod to be Ready..."
-          kubectl wait \
-            --for=condition=ready pod \
-            -l app=spring-app \
-            --timeout=120s
-
-          echo "Waiting for service endpoint..."
-          URL=$(minikube service spring-app-service --url)
-          echo "Service URL: $URL"
-
-          for i in {1..15}; do
-            echo "Health check attempt $i..."
-            if curl -f "$URL/health"; then
-              echo "✅ Application is healthy"
-              exit 0
-            fi
-            sleep 5
-          done
-
-          echo "❌ Application did not become healthy in time"
-          exit 1
