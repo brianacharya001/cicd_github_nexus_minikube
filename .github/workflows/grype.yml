@@ -146,14 +146,19 @@ jobs:
           restore-keys: |
             grype-db-${{ runner.os }}
 
-      # ✅ Install Grype (lightweight, quick)
-      - name: Install Grype
+      # ✅ FIX: Install Grype WITHOUT /usr/local/bin permission (install to user path)
+      - name: Install Grype (user local)
         run: |
           set -e
+
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
           if ! command -v grype >/dev/null 2>&1; then
             curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-              | sh -s -- -b /usr/local/bin
+              | sh -s -- -b "$HOME/.local/bin"
           fi
+
           grype version
 
       - name: Docker Login to Nexus
@@ -188,6 +193,7 @@ jobs:
           grype "$IMAGE" --fail-on high > /dev/null
         env:
           GRYPE_DB_CACHE_DIR: ${{ env.GRYPE_DB_CACHE_DIR }}
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
 
       - name: Upload Grype SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
@@ -249,4 +255,3 @@ jobs:
 
           echo "❌ Application did not become healthy in time"
           exit 1
-
