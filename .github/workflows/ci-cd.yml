@@ -137,17 +137,21 @@ jobs:
             --username "${{ secrets.NEXUS_USERNAME }}" \
             --password-stdin
 
+      # ✅ MIN change: define one version and use it for build/tag/push/scan/deploy
+      - name: Set Image Version (short sha)
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
       - name: Build Docker Image
         run: |
-          docker build -t localhost:32000/my-docker-repo/spring-app:${{ github.sha }} .
-          docker tag localhost:32000/my-docker-repo/spring-app:${{ github.sha }} \
+          docker build -t localhost:32000/my-docker-repo/spring-app:${IMAGE_TAG} .
+          docker tag localhost:32000/my-docker-repo/spring-app:${IMAGE_TAG} \
                      localhost:32000/my-docker-repo/spring-app:latest
 
       # ✅ Trivy scan BEFORE pushing to registry
       - name: Trivy Scan (Image) - fail on HIGH/CRITICAL
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: "localhost:32000/my-docker-repo/spring-app:${{ github.sha }}"
+          image-ref: "localhost:32000/my-docker-repo/spring-app:${{ env.IMAGE_TAG }}"
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "HIGH,CRITICAL"
@@ -162,7 +166,7 @@ jobs:
 
       - name: Push Image to Nexus Docker Registry
         run: |
-          docker push localhost:32000/my-docker-repo/spring-app:${{ github.sha }}
+          docker push localhost:32000/my-docker-repo/spring-app:${IMAGE_TAG}
           docker push localhost:32000/my-docker-repo/spring-app:latest
 
   deploy-to-minikube:
