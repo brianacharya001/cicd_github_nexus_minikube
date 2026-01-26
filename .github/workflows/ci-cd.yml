@@ -162,4 +162,62 @@ jobs:
           vuln-type: "os,library"
 
       - name: Upload Trivy SARIF to GitHub Security
-        uses: g
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Push Image to Nexus Docker Registry
+        run: |
+          docker push 192.168.49.2:32000/my-docker-repo/spring-app:${IMAGE_TAG}
+          docker push 192.168.49.2:32000/my-docker-repo/spring-app:latest
+
+  deploy-to-minikube:
+    needs: build-scan-and-push-docker
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Minikube
+        run: |
+          kubectl config use-context minikube
+
+          kubectl create secret docker-registry nexus-creds \
+            --docker-server=192.168.49.2:32000 \
+            --docker-username=${{ secrets.NEXUS_USERNAME }} \
+            --docker-password=${{ secrets.NEXUS_PASSWORD }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          helm upgrade --install spring-boot-release ./charts/spring-app \
+            --set image.repository=192.168.49.2:32000/my-docker-repo/spring-app \
+            --set image.tag=latest \
+            --set image.pullPolicy=Always \
+            --wait
+
+      - name: Verify Deployment (wait for app)
+        run: |
+          set -e
+
+          echo "Waiting for pod to be Ready..."
+          kubectl wait \
+            --for=condition=ready pod \
+            -l app=spring-app \
+            --timeout=120s
+
+          echo "Waiting for service endpoint..."
+          URL=$(minikube service spring-app-service --url)
+          echo "Service URL: $URL"
+
+          for i in {1..15}; do
+            echo "Health check attempt $i..."
+            if curl -f "$URL/health"; then
+              echo "✅ Application is healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "❌ Application did not become healthy in time"
+          exit 1
