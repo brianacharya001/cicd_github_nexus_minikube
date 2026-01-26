@@ -112,6 +112,11 @@ jobs:
     runs-on: self-hosted
     environment: production
 
+    # ✅ FIX: make Trivy DB downloads reliable + cache the DB on self-hosted runner
+    env:
+      TRIVY_CACHE_DIR: ~/.cache/trivy
+      TRIVY_TIMEOUT: 10m
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -133,6 +138,15 @@ jobs:
       - name: Build Spring Boot JAR
         run: mvn clean package -DskipTests
 
+      # ✅ FIX: cache Trivy DB so it doesn't need to re-download every run
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}
+
       # ✅ ONLY CHANGE: secure docker login using --password-stdin
       - name: Docker Login to Nexus
         run: |
@@ -150,6 +164,7 @@ jobs:
                      192.168.49.2:32000/my-docker-repo/spring-app:latest
 
       # ✅ Trivy scan BEFORE pushing to registry
+      # ✅ FIX: add timeout + cache dir (prevents "trivy-db ... context deadline exceeded")
       - name: Trivy Scan (Image) - fail on HIGH/CRITICAL
         uses: aquasecurity/trivy-action@0.28.0
         with:
@@ -160,6 +175,9 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           vuln-type: "os,library"
+        env:
+          TRIVY_CACHE_DIR: ${{ env.TRIVY_CACHE_DIR }}
+          TRIVY_TIMEOUT: ${{ env.TRIVY_TIMEOUT }}
 
       - name: Upload Trivy SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
