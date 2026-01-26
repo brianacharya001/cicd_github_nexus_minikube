@@ -22,11 +22,9 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
-      # 🔑 Configure Maven settings.xml for Nexus (with repositories)
       - name: Configure Maven settings.xml for Nexus
         run: |
           mkdir -p ~/.m2
-          # MIN FIX: remove quotes around EOF so env vars expand
           cat <<EOF > ~/.m2/settings.xml
           <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -111,10 +109,10 @@ jobs:
     runs-on: self-hosted
     environment: production
 
-    # ✅ Grype cache location (Anchore DB)
     env:
       GRYPE_DB_CACHE_DIR: ~/.cache/grype
       GRYPE_CHECK_FOR_APP_UPDATE: "false"
+      GRYPE_VERSION: "v0.105.0"
 
     steps:
       - name: Checkout Code
@@ -137,7 +135,6 @@ jobs:
       - name: Build Spring Boot JAR
         run: mvn clean package -DskipTests
 
-      # ✅ Cache Grype DB (makes scans much faster after first run)
       - name: Cache Grype DB
         uses: actions/cache@v4
         with:
@@ -146,18 +143,36 @@ jobs:
           restore-keys: |
             grype-db-${{ runner.os }}
 
-      # ✅ FIX: Install Grype WITHOUT /usr/local/bin permission (install to user path)
-      - name: Install Grype (user local)
+      # ✅ FIX: Do NOT use install.sh (it sometimes still tries /usr/local/bin).
+      # ✅ Install Grype by downloading tarball into $HOME/.local/bin (no sudo).
+      - name: Install Grype (no sudo, user local bin)
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          INSTALL_DIR="$HOME/.local/bin"
+          mkdir -p "$INSTALL_DIR"
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 
-          if ! command -v grype >/dev/null 2>&1; then
-            curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-              | sh -s -- -b "$HOME/.local/bin"
+          if command -v grype >/dev/null 2>&1; then
+            echo "grype already installed: $(grype version)"
+            exit 0
           fi
+
+          OS="linux"
+          ARCH="amd64"
+          VERSION="${GRYPE_VERSION}"
+
+          TMP_DIR="$(mktemp -d)"
+          cd "$TMP_DIR"
+
+          echo "Downloading Grype ${VERSION}..."
+          curl -sSfL -o grype.tgz \
+            "https://github.com/anchore/grype/releases/download/${VERSION}/grype_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+
+          tar -xzf grype.tgz
+          chmod +x grype
+          mv grype "$INSTALL_DIR/grype"
 
           grype version
 
@@ -175,21 +190,19 @@ jobs:
           docker tag 192.168.49.2:32000/my-docker-repo/spring-app:${IMAGE_TAG} \
                      192.168.49.2:32000/my-docker-repo/spring-app:latest
 
-      # ✅ Grype scan BEFORE pushing
-      # - fail build on HIGH/CRITICAL
-      # - output SARIF so GitHub can ingest it
       - name: Grype Scan (Image) - fail on HIGH/CRITICAL
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           IMAGE="192.168.49.2:32000/my-docker-repo/spring-app:${IMAGE_TAG}"
 
-          # Ensure DB is present/updated (cached after first run)
+          # DB update (cached after first run)
           grype db update || true
 
-          # Produce SARIF for GitHub Security tab
+          # SARIF for GitHub Security
           grype "$IMAGE" -o sarif > grype-results.sarif
 
-          # Enforce policy: fail if HIGH/CRITICAL exists
+          # Fail pipeline if HIGH/CRITICAL found
           grype "$IMAGE" --fail-on high > /dev/null
         env:
           GRYPE_DB_CACHE_DIR: ${{ env.GRYPE_DB_CACHE_DIR }}
