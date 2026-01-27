@@ -1,0 +1,101 @@
+name: Install Nexus on Minikube (Self-Hosted)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  install-nexus:
+    runs-on: self-hosted
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Minikube Connectivity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Switching to Minikube context..."
+          kubectl config use-context minikube
+
+          echo "Checking cluster status..."
+          kubectl cluster-info
+
+          echo "Nodes:"
+          kubectl get nodes -o wide
+
+      - name: Ensure Helm is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm version
+
+      - name: Add Nexus Helm repo
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Popular community chart repo for Nexus3
+          helm repo add oteemocharts https://oteemo.github.io/charts
+          helm repo update
+
+      - name: Create namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl create namespace nexus --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Install/Upgrade Nexus (Nexus3)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # NOTE:
+          # - Service type NodePort works well with Minikube
+          # - Persistence enabled with a PVC (uses Minikube default storage class)
+          # - Resource requests kept modest for local cluster
+          helm upgrade --install nexus oteemocharts/sonatype-nexus \
+            --namespace nexus \
+            --create-namespace \
+            --set nexus.service.type=NodePort \
+            --set persistence.enabled=true \
+            --set persistence.storageClassName=standard \
+            --set persistence.storageSize=8Gi \
+            --set resources.requests.cpu=200m \
+            --set resources.requests.memory=512Mi \
+            --wait \
+            --timeout 10m
+
+      - name: Wait and show status
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get pods -n nexus -o wide
+          kubectl get svc -n nexus
+
+      - name: Print Nexus URL (Minikube service)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Nexus URL:"
+          minikube service nexus-sonatype-nexus -n nexus --url || true
+
+          echo ""
+          echo "If URL is empty, run:"
+          echo "  kubectl get svc -n nexus"
+          echo "  minikube service <service-name> -n nexus --url"
+
+      - name: Get initial admin password
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Nexus stores initial admin password in /nexus-data/admin.password inside the pod
+          POD="$(kubectl get pods -n nexus -l app=sonatype-nexus -o jsonpath='{.items[0].metadata.name}')"
+          echo "Nexus Pod: $POD"
+
+          echo "Initial admin password:"
+          kubectl exec -n nexus "$POD" -- cat /nexus-data/admin.password || true
