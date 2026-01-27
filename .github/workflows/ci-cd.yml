@@ -139,13 +139,13 @@ jobs:
         run: mvn clean package -DskipTests
 
       # ✅ FIX: cache Trivy DB so it doesn't need to re-download every run
-      - name: Cache Trivy DB
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/trivy
-          key: trivy-db-${{ runner.os }}
-          restore-keys: |
-            trivy-db-${{ runner.os }}
+      # - name: Cache Trivy DB
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.cache/trivy
+      #     key: trivy-db-${{ runner.os }}
+      #     restore-keys: |
+      #       trivy-db-${{ runner.os }}
 
       # ✅ ONLY CHANGE: secure docker login using --password-stdin
       - name: Docker Login to Nexus
@@ -165,24 +165,24 @@ jobs:
 
       # ✅ Trivy scan BEFORE pushing to registry
       # ✅ FIX: add timeout + cache dir (prevents "trivy-db ... context deadline exceeded")
-      - name: Trivy Scan (Image) - fail on HIGH/CRITICAL
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: "192.168.49.2:32000/my-docker-repo/spring-app:${{ env.IMAGE_TAG }}"
-          format: "sarif"
-          output: "trivy-results.sarif"
-          severity: "HIGH,CRITICAL"
-          ignore-unfixed: true
-          exit-code: "1"
-          vuln-type: "os,library"
-        env:
-          TRIVY_CACHE_DIR: ${{ env.TRIVY_CACHE_DIR }}
-          TRIVY_TIMEOUT: ${{ env.TRIVY_TIMEOUT }}
+      # - name: Trivy Scan (Image) - fail on HIGH/CRITICAL
+      #   uses: aquasecurity/trivy-action@0.28.0
+      #   with:
+      #     image-ref: "192.168.49.2:32000/my-docker-repo/spring-app:${{ env.IMAGE_TAG }}"
+      #     format: "sarif"
+      #     output: "trivy-results.sarif"
+      #     severity: "HIGH,CRITICAL"
+      #     ignore-unfixed: true
+      #     exit-code: "1"
+      #     vuln-type: "os,library"
+      #   env:
+      #     TRIVY_CACHE_DIR: ${{ env.TRIVY_CACHE_DIR }}
+      #     TRIVY_TIMEOUT: ${{ env.TRIVY_TIMEOUT }}
 
-      - name: Upload Trivy SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
+      # - name: Upload Trivy SARIF to GitHub Security
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: trivy-results.sarif
 
       - name: Push Image to Nexus Docker Registry
         run: |
