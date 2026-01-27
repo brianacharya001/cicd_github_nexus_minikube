@@ -6,7 +6,7 @@ on:
 jobs:
   install-nexus:
     runs-on: self-hosted
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
       - name: Checkout repository
@@ -26,6 +26,9 @@ jobs:
           echo "Nodes:"
           kubectl get nodes -o wide
 
+          echo "StorageClasses:"
+          kubectl get sc || true
+
       - name: Ensure Helm is available
         shell: bash
         run: |
@@ -36,8 +39,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          # Popular community chart repo for Nexus3
           helm repo add oteemocharts https://oteemo.github.io/charts
           helm repo update
 
@@ -47,15 +48,12 @@ jobs:
           set -euo pipefail
           kubectl create namespace nexus --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Install/Upgrade Nexus (Nexus3)
+      - name: Install/Upgrade Nexus (more resilient)
         shell: bash
         run: |
           set -euo pipefail
 
-          # NOTE:
-          # - Service type NodePort works well with Minikube
-          # - Persistence enabled with a PVC (uses Minikube default storage class)
-          # - Resource requests kept modest for local cluster
+          # Nexus first install can take a long time (image pull + init + persistence)
           helm upgrade --install nexus oteemocharts/sonatype-nexus \
             --namespace nexus \
             --create-namespace \
@@ -64,15 +62,15 @@ jobs:
             --set persistence.storageClassName=standard \
             --set persistence.storageSize=8Gi \
             --set resources.requests.cpu=200m \
-            --set resources.requests.memory=512Mi \
+            --set resources.requests.memory=1Gi \
+            --set resources.limits.cpu=1 \
+            --set resources.limits.memory=2Gi \
             --wait \
-            --timeout 10m
+            --timeout 25m
 
-      - name: Wait and show status
-        shell: bash
-        run: |
-          set -euo pipefail
+          echo "=== Post-install status ==="
           kubectl get pods -n nexus -o wide
+          kubectl get pvc -n nexus
           kubectl get svc -n nexus
 
       - name: Print Nexus URL (Minikube service)
@@ -80,11 +78,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Nexus URL:"
+          echo "Nexus URL (try minikube service):"
           minikube service nexus-sonatype-nexus -n nexus --url || true
 
           echo ""
-          echo "If URL is empty, run:"
+          echo "If the service name differs, run:"
           echo "  kubectl get svc -n nexus"
           echo "  minikube service <service-name> -n nexus --url"
 
@@ -93,9 +91,42 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Nexus stores initial admin password in /nexus-data/admin.password inside the pod
-          POD="$(kubectl get pods -n nexus -l app=sonatype-nexus -o jsonpath='{.items[0].metadata.name}')"
-          echo "Nexus Pod: $POD"
+          # This label works for many installs, but if it doesn't, we fallback to first pod
+          POD="$(kubectl get pods -n nexus -l app=sonatype-nexus -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+          if [[ -z "${POD}" ]]; then
+            POD="$(kubectl get pods -n nexus -o jsonpath='{.items[0].metadata.name}')"
+          fi
 
+          echo "Nexus Pod: ${POD}"
           echo "Initial admin password:"
-          kubectl exec -n nexus "$POD" -- cat /nexus-data/admin.password || true
+          kubectl exec -n nexus "${POD}" -- cat /nexus-data/admin.password || true
+
+      - name: Debug Nexus if install fails
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+
+          echo "=== Pods ==="
+          kubectl get pods -n nexus -o wide
+
+          echo "=== PVC ==="
+          kubectl get pvc -n nexus
+
+          echo "=== Services ==="
+          kubectl get svc -n nexus
+
+          echo "=== Events (last 100) ==="
+          kubectl get events -n nexus --sort-by=.lastTimestamp | tail -100
+
+          echo "=== Describe pods ==="
+          for p in $(kubectl get pods -n nexus -o name); do
+            echo "--- $p ---"
+            kubectl describe -n nexus "$p"
+          done
+
+          echo "=== Logs (best effort) ==="
+          for p in $(kubectl get pods -n nexus -o jsonpath='{.items[*].metadata.name}'); do
+            echo "--- logs: $p ---"
+            kubectl logs -n nexus "$p" --tail=200 || true
+          done
